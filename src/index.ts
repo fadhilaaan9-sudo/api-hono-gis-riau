@@ -185,28 +185,59 @@ app.get("/api/kebakaran", async (c) => {
 // Statistik per kabupaten untuk panel/choropleth: sawit rakyat 2024,
 // terbakar BPBD dan SiPongi sebagai kolom terpisah, jumlah hotspot,
 // dan luas poligon kebakaran hasil ST_Intersection (Q1 + Q2 + Q3).
+// Versi lama memakai subquery per kabupaten (12x scan hotspot +
+// 12x scan areal), sehingga di laptop ferhen query ini lewat dari
+// batas 10 detik Bun dan koneksi diputus. Versi ini memakai CTE:
+// hitung hotspot dan luas terbakar SEKALI untuk semua kabupaten,
+// baru di-join ke tabel kecil stats. Log durasi dicetak ke terminal
+// supaya kalau masih lambat, angka pastinya kelihatan.
 app.get("/api/stats", async (c) => {
+  const started = Date.now();
   try {
     const { rows } = await pool.query(
-      `SELECT k.nama AS kabupaten,
+      `WITH hotspot_counts AS (
+         SELECT k.nama AS kabupaten, COUNT(h.id)::int AS jumlah_hotspot
+         FROM kabupaten k
+         LEFT JOIN hotspot_2026 h ON ST_Within(h.geom, k.geom)
+         GROUP BY k.nama
+       ),
+       burned_areas AS (
+         SELECT k.nama AS kabupaten,
+                SUM(ST_Area(ST_Intersection(a.geom, k.geom)::geography) / 10000)
+                  AS luas_poligon_kebakaran_ha
+         FROM kabupaten k
+         JOIN areal_kebakaran a ON ST_Intersects(a.geom, k.geom)
+         GROUP BY k.nama
+       )
+       SELECT k.nama AS kabupaten,
               s.luas_sawit_rakyat_ha, s.produksi_ton, s.petani_kk, s.tahun,
               b.luas_ha AS terbakar_bpbd_ha, b.periode AS terbakar_bpbd_periode,
               p.luas_ha AS terbakar_sipongi_ha, p.periode AS terbakar_sipongi_periode,
-              (SELECT COUNT(*)::int FROM hotspot_2026 h
-                WHERE ST_Within(h.geom, k.geom)) AS jumlah_hotspot,
-              (SELECT COALESCE(SUM(ST_Area(ST_Intersection(a.geom, k.geom)::geography) / 10000), 0)
-                 FROM areal_kebakaran a WHERE ST_Intersects(a.geom, k.geom)
-              ) AS luas_poligon_kebakaran_ha
+              COALESCE(hc.jumlah_hotspot, 0) AS jumlah_hotspot,
+              COALESCE(ba.luas_poligon_kebakaran_ha, 0) AS luas_poligon_kebakaran_ha
        FROM kabupaten k
        LEFT JOIN stats_sawit s ON s.kabupaten = k.nama
        LEFT JOIN stats_terbakar b ON b.kabupaten = k.nama AND b.sumber LIKE '%BPBD%'
        LEFT JOIN stats_terbakar p ON p.kabupaten = k.nama AND p.sumber LIKE '%SIPONGI%'
+       LEFT JOIN hotspot_counts hc ON hc.kabupaten = k.nama
+       LEFT JOIN burned_areas ba ON ba.kabupaten = k.nama
        ORDER BY k.nama`,
     );
+    console.log(`GET /api/stats ${Date.now() - started}ms`);
     return c.json(rows);
   } catch (err) {
+    console.error("GET /api/stats error:", err);
     return c.json({ error: String(err) }, 500);
   }
 });
 
-export default app;
+// Bun membunuh request yang idle lebih dari 10 detik secara default,
+// dan query spasial di atas (ST_Intersection + luas geography atas
+// 1.814 poligon) bisa lewat dari itu di laptop. Naikkan batasnya
+// jadi 60 detik supaya query yang sah tidak diputus di tengah jalan.
+// Bentuk ini setara dengan "export default app" + port 3000.
+export default {
+  port: 3000,
+  idleTimeout: 60,
+  fetch: app.fetch,
+};
