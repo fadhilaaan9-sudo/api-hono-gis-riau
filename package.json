@@ -1,16 +1,14 @@
 {
   "name": "api-hono-gis-riau",
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
-    "postinstall": "prisma skills sync || exit 0"
+    "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.10.1",
-    "@prisma/client": "^7.10.1",
-    "hono": "^4.13.14"
+    "hono": "^4.13.14",
+    "pg": "^8.16.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "prisma": "7.10.1"
+    "@types/pg": "^8.11.0"
   }
 }
