@@ -66,9 +66,9 @@ app.get("/api/kabupaten/:nama", async (c) => {
   try {
     const { rows } = await pool.query(
       `SELECT k.id, k.nama, ST_AsGeoJSON(k.geom)::json AS geometry,
-              s.luas_sawit_rakyat_ha, s.produksi_ton, s.petani_kk, s.tahun,
-              b.luas_ha AS terbakar_bpbd_ha, b.periode AS terbakar_bpbd_periode,
-              p.luas_ha AS terbakar_sipongi_ha, p.periode AS terbakar_sipongi_periode,
+              s.luas_sawit_rakyat_ha::float AS luas_sawit_rakyat_ha, s.produksi_ton::float AS produksi_ton, s.petani_kk, s.tahun,
+              b.luas_ha::float AS terbakar_bpbd_ha, b.periode AS terbakar_bpbd_periode,
+              p.luas_ha::float AS terbakar_sipongi_ha, p.periode AS terbakar_sipongi_periode,
               (SELECT COUNT(*)::int FROM hotspot_2026 h
                 WHERE ST_Within(h.geom, k.geom)) AS jumlah_hotspot,
               (SELECT COALESCE(SUM(ST_Area(ST_Intersection(a.geom, k.geom)::geography) / 10000), 0)
@@ -210,9 +210,9 @@ app.get("/api/stats", async (c) => {
          GROUP BY k.nama
        )
        SELECT k.nama AS kabupaten,
-              s.luas_sawit_rakyat_ha, s.produksi_ton, s.petani_kk, s.tahun,
-              b.luas_ha AS terbakar_bpbd_ha, b.periode AS terbakar_bpbd_periode,
-              p.luas_ha AS terbakar_sipongi_ha, p.periode AS terbakar_sipongi_periode,
+              s.luas_sawit_rakyat_ha::float AS luas_sawit_rakyat_ha, s.produksi_ton::float AS produksi_ton, s.petani_kk, s.tahun,
+              b.luas_ha::float AS terbakar_bpbd_ha, b.periode AS terbakar_bpbd_periode,
+              p.luas_ha::float AS terbakar_sipongi_ha, p.periode AS terbakar_sipongi_periode,
               COALESCE(hc.jumlah_hotspot, 0) AS jumlah_hotspot,
               COALESCE(ba.luas_poligon_kebakaran_ha, 0) AS luas_poligon_kebakaran_ha
        FROM kabupaten k
