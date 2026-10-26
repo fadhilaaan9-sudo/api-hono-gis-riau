@@ -237,7 +237,8 @@ app.get("/api/stats", async (c) => {
 // jadi 60 detik supaya query yang sah tidak diputus di tengah jalan.
 // Bentuk ini setara dengan "export default app" + port 3000.
 export default {
-  port: 3000,
+  // Render menyuntikkan PORT (biasanya 10000); di laptop tanpa PORT tetap 3000.
+  port: Number(process.env.PORT ?? 3000),
   idleTimeout: 60,
   fetch: app.fetch,
 };
