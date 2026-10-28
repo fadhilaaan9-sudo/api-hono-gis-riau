@@ -7,6 +7,18 @@ const app = new Hono();
 // CORS wajib: frontend Leaflet jalan di origin/port berbeda dari API.
 app.use("*", cors());
 
+// Data historis tidak berubah, jadi browser/CDN boleh menyimpannya 1 jam.
+// /api/health dikecualikan supaya status selalu dicek langsung.
+app.use("/api/*", async (c, next) => {
+  await next();
+  if (c.req.path !== "/api/health") {
+    c.header(
+      "Cache-Control",
+      "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400",
+    );
+  }
+});
+
 // ST_AsGeoJSON di-cast ke ::json supaya pg mengembalikannya sebagai objek,
 // bukan string. Helper ini berjaga-jaga kalau hasilnya masih string.
 function asGeometry(value: unknown) {
@@ -17,6 +29,9 @@ function asGeometry(value: unknown) {
 function toFeature(row: any, propertyKeys: string[]) {
   const properties: Record<string, unknown> = {};
   for (const key of propertyKeys) properties[key] = row[key];
+  // Endpoint tanpa geometri (hotspot dan profil) tidak mengirim field
+  // geometry sama sekali, supaya payload lebih kecil.
+  if (row.geometry === undefined) return { type: "Feature", properties };
   return { type: "Feature", geometry: asGeometry(row.geometry), properties };
 }
 
@@ -43,10 +58,12 @@ app.get("/api/health", async (c) => {
 });
 
 // Daftar 12 kabupaten sebagai GeoJSON (poligon BIG, nama = kolom WADMKK).
+// Geometri disederhanakan (toleransi 0,0005 derajat, presisi 5 desimal)
+// karena peta dibuka di zoom provinsi; detail penuh tidak terlihat.
 app.get("/api/kabupaten", async (c) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, nama, ST_AsGeoJSON(geom)::json AS geometry
+      `SELECT id, nama, ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.0005), 5)::json AS geometry
        FROM kabupaten ORDER BY nama`,
     );
     return c.json({
@@ -58,14 +75,15 @@ app.get("/api/kabupaten", async (c) => {
   }
 });
 
-// Profil satu kabupaten: geometri + sawit rakyat 2024 + terbakar BPBD/SiPongi
+// Profil satu kabupaten: sawit rakyat 2024 + terbakar BPBD/SiPongi
+// (tanpa geometri: modal hanya memakai angka, poligonnya sudah ada di peta)
 // (kolom terpisah, jangan dijumlahkan) + jumlah hotspot + luas poligon kebakaran.
 // Nama dicocokkan case-insensitive supaya "kampar" tetap ketemu "Kampar".
 app.get("/api/kabupaten/:nama", async (c) => {
   const nama = decodeURIComponent(c.req.param("nama"));
   try {
     const { rows } = await pool.query(
-      `SELECT k.id, k.nama, ST_AsGeoJSON(k.geom)::json AS geometry,
+      `SELECT k.id, k.nama,
               s.luas_sawit_rakyat_ha::float AS luas_sawit_rakyat_ha, s.produksi_ton::float AS produksi_ton, s.petani_kk, s.tahun,
               b.luas_ha::float AS terbakar_bpbd_ha, b.periode AS terbakar_bpbd_periode,
               p.luas_ha::float AS terbakar_sipongi_ha, p.periode AS terbakar_sipongi_periode,
@@ -106,7 +124,8 @@ app.get("/api/kabupaten/:nama", async (c) => {
   }
 });
 
-// Titik panas VIIRS 2026. Filter opsional:
+// Titik panas VIIRS 2026. Geometri Point tidak dikirim: frontend
+// menggambar titik dari latitude/longitude. Filter opsional:
 //   ?kabupaten=Kampar  (titik di dalam poligon kabupaten itu)
 //   ?dari=2026-01-01&sampai=2026-10-23  (berdasar acq_date)
 app.get("/api/hotspots", async (c) => {
@@ -133,8 +152,7 @@ app.get("/api/hotspots", async (c) => {
   try {
     const { rows } = await pool.query(
       `SELECT h.id, h.latitude, h.longitude, h.acq_date, h.acq_time,
-              h.satellite, h.confidence, h.frp, h.daynight,
-              ST_AsGeoJSON(h.geom)::json AS geometry
+              h.satellite, h.confidence, h.frp, h.daynight
        FROM hotspot_2026 h ${join} ${where}
        ORDER BY h.acq_date, h.id LIMIT 10000`,
       params,
@@ -167,7 +185,7 @@ app.get("/api/kebakaran", async (c) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, ket, akurasi, periode, namobj,
-              ST_AsGeoJSON(geom)::json AS geometry,
+              ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.0005), 5)::json AS geometry,
               ST_Area(geom::geography) / 10000 AS luas_ha
        FROM areal_kebakaran ORDER BY id`,
     );
