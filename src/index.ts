@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { pool } from "./db";
+import { aiRoute } from "./ai/routes/aiRoute";
 
 const app = new Hono();
 
@@ -11,7 +12,7 @@ app.use("*", cors());
 // /api/health dikecualikan supaya status selalu dicek langsung.
 app.use("/api/*", async (c, next) => {
   await next();
-  if (c.req.path !== "/api/health") {
+  if (c.req.path !== "/api/health" && !c.req.path.startsWith("/api/ai/")) {
     c.header(
       "Cache-Control",
       "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400",
@@ -35,6 +36,8 @@ function toFeature(row: any, propertyKeys: string[]) {
   return { type: "Feature", geometry: asGeometry(row.geometry), properties };
 }
 
+app.route("/api/ai", aiRoute);
+
 app.get("/", (c) =>
   c.json({
     name: "WebGIS Riau API",
@@ -44,6 +47,7 @@ app.get("/", (c) =>
       "GET /api/hotspots?kabupaten=&dari=&sampai=",
       "GET /api/kebakaran",
       "GET /api/stats",
+      "POST /api/ai/ask",
     ],
   }),
 );
